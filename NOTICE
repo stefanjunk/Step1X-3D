@@ -1,0 +1,62 @@
+Step1X-3D — geometry-only fork
+==============================
+
+This repository is a fork of Step1X-3D by StepFun (stepfun-ai), which is
+distributed under the Apache License, Version 2.0. A copy of that licence is in
+LICENSE. Files changed relative to upstream are marked as modified in the
+commit history and summarised in FORK.md.
+
+Upstream project
+----------------
+Step1X-3D — https://github.com/stepfun-ai/Step1X-3D — Apache License 2.0.
+Forked at commit cb5ac94 ("[Fix] fix bug in sharp edge sampling").
+
+Removed from this fork
+----------------------
+The upstream texture stack and one geometry file carried a verbatim
+"TENCENT HUNYUAN NON-COMMERCIAL LICENSE AGREEMENT" header. They are not part of
+this fork:
+
+- step1x3d_texture/** (the whole texture pipeline, including the vendored
+  custom_rasterizer and differentiable_renderer extensions), configs/
+  train-texture-ig2mv/**, data/ig2mv/**, train_ig2mv.py and train_ig2mv.sh —
+  deleted.
+- step1x3d_geometry/models/autoencoders/volume_decoders.py — replaced by an
+  independent implementation written for this fork against the interface the
+  geometry VAE requires. See FORK.md and tests/test_volume_decoders.py.
+
+Third-party code retained in this fork
+--------------------------------------
+The geometry stack contains files adapted from, or citing, the following
+projects. Their own licences continue to apply to those portions:
+
+- Hugging Face Diffusers and Transformers — Apache License 2.0
+  (step1x3d_geometry/models/transformers/*, models/conditional_encoders/*).
+- facebookresearch/dino and facebookresearch/dinov2 — Apache License 2.0
+  (models/conditional_encoders/dinov2*).
+- openai/CLIP — MIT License (models/conditional_encoders/clip*).
+- PixArt-alpha/PixArt-alpha — Apache License 2.0 (referenced in
+  models/attention.py and models/transformers/pixart_transformer_1d.py).
+- 3DTopia/OpenLRM — Apache License 2.0 (referenced in the conditional
+  encoders).
+- facebookresearch/DiT — Attribution-NonCommercial 4.0 International. Listed in
+  the "Reference:" comment of
+  models/conditional_encoders/clip/modeling_conditional_clip.py and
+  models/conditional_encoders/dinov2/modeling_conditional_dinov2.py. Both files
+  carry the Apache-2.0 header of the Hugging Face Transformers model files they
+  adapt, and neither contains the adaLN-Zero block that the cited DiT region
+  implements: there is no modulate(), adaLN, shift_msa or scale_msa code in
+  models/conditional_encoders/. The reference is therefore an architectural
+  citation rather than copied expression. See FORK.md for the exact check.
+
+Model weights used at runtime
+-----------------------------
+Weights are downloaded from Hugging Face and are not redistributed here:
+
+- stepfun-ai/Step1X-3D — Apache License 2.0.
+- facebook/dinov2-with-registers-large — Apache License 2.0.
+- openai/clip-vit-large-patch14 — the model card declares no licence; the
+  upstream openai/CLIP code repository is MIT. UNRESOLVED for the weights.
+
+Python dependencies are installed from their own distributions under their own
+licences; see requirements*.txt.

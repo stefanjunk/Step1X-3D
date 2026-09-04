@@ -1,3 +1,10 @@
+> **Fork notice.** This is a geometry-only fork of Step1X-3D, adapted for a
+> local two-GPU host. The texture pipeline and the third-party code that
+> carried a non-commercial licence have been removed, and the volume decoders
+> and mesh post-processing were reimplemented. See [FORK.md](FORK.md) and
+> [NOTICE](NOTICE); sections below that describe texture generation no longer
+> apply.
+
 <p align="left">
         <a href="README_CN.md">中文</a> &nbsp｜ &nbsp English&nbsp&nbsp 
 </p>
@@ -100,17 +107,14 @@ We have checked the environment in cuda12.4 and you can install cuda12.4 by foll
 ```bash
 pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu124
 pip install -r requirements.txt
-pip install torch-cluster -f https://data.pyg.org/whl/torch-2.5.1+cu124.html
-pip install "git+https://github.com/facebookresearch/pytorch3d.git@stable"
-pip install kaolin==0.17.0 -f https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.5.1_cu124.html
-
-cd step1x3d_texture/custom_rasterizer
-python setup.py install
-cd ../differentiable_renderer
-python setup.py install
-cd ../../
+pip install -r requirements.cuda124.txt
 ```
-We reused custom_rasterizer and differentiable_renderer tools in [Hunyuan3D 2.0]((https://github.com/Tencent/Hunyuan3D-2)) for the texture baker, thanks to their open-source contribution.
+
+In this fork there is nothing to compile: the texture stack and its two native
+extensions were removed, so PyTorch3D, kaolin, nvdiffrast, `custom_rasterizer`
+and `differentiable_renderer` are no longer installed. `docker compose up -d`
+builds and runs the same environment; see [DOCKER.md](DOCKER.md) and
+[FORK.md](FORK.md).
 
 ## 5. Inference Script
 
@@ -140,40 +144,8 @@ out = geometry_pipeline(input_image_path, guidance_scale=7.5, num_inference_step
 out.mesh[0].export("untexture_mesh.glb")
 
 
-# Stage 2: 3D texure synthsis
-from step1x3d_texture.pipelines.step1x_3d_texture_synthesis_pipeline import (
-    Step1X3DTexturePipeline,
-)
-from step1x3d_geometry.models.pipelines.pipeline_utils import reduce_face, remove_degenerate_face
-import trimesh
-
-# load untextured mesh
-untexture_mesh = trimesh.load("untexture_mesh.glb")
-
-# define texture_pipeline
-texture_pipeline = Step1X3DTexturePipeline.from_pretrained("stepfun-ai/Step1X-3D", subfolder="Step1X-3D-Texture")
-
-# reduce face
-untexture_mesh = remove_degenerate_face(untexture_mesh)
-untexture_mesh = reduce_face(untexture_mesh)
-
-# texture mapping
-textured_mesh = texture_pipeline(input_image_path, untexture_mesh)
-
-# export textured mesh as .glb format
-textured_mesh.export("textured_mesh.glb")
+# Stage 2 (texture synthesis) is not part of this fork; see FORK.md.
 ```
-
-You can also run the the whole process by running
-```bash
-python inference.py
-```
-
-We also provide an interactive generation based on gradio with local deployment
-```bash
-python app.py
-```
- or [huggingface web live](https://huggingface.co/spaces/stepfun-ai/Step1X-3D)
 
 ## 6. Training Script
 You can select a configuration file for training and modify the scripts to support multi-GPU training or more training setting.

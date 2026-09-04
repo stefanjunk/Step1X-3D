@@ -1,3 +1,8 @@
+> **Fork notice / 分支说明.** This is a geometry-only fork of Step1X-3D. The
+> texture pipeline and the third-party code that carried a non-commercial
+> licence have been removed. See [FORK.md](FORK.md) and [NOTICE](NOTICE); the
+> texture sections below no longer apply.
+
 <p align="left">
         <a href="README_CN.md">中文</a> &nbsp｜ &nbsp English&nbsp&nbsp 
 </p>
