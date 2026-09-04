@@ -1,7 +1,8 @@
 # syntax=docker/dockerfile:1.7
 
-# CUDA 12.4.1, cuDNN and the complete compiler toolchain are required for
-# nvdiffrast, PyTorch3D and Step1X-3D's custom rasterizer.
+# CUDA 12.4.1 and cuDNN match the PyTorch cu124 wheels this fork pins. The
+# devel image is retained because prebuilt wheels are resolved against it; no
+# source extension is compiled since the texture path was removed.
 ARG CUDA_BASE_IMAGE=nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04@sha256:0a1cb6e7bd047a1067efe14efdf0276352d5ca643dfd77963dab1a4f05a003a4
 FROM ${CUDA_BASE_IMAGE}
 
@@ -79,28 +80,15 @@ RUN python -m pip install \
 COPY requirements.web.txt ./
 RUN python -m pip install -r requirements.web.txt
 
-# Keep native extension builds independent from changes to the Python app and
-# pipelines. This makes later code-only rebuilds reuse the expensive sm_89
-# compilation layer.
-COPY step1x3d_texture/custom_rasterizer ./step1x3d_texture/custom_rasterizer
-COPY step1x3d_texture/differentiable_renderer ./step1x3d_texture/differentiable_renderer
-RUN python -m pip install --no-build-isolation ./step1x3d_texture/custom_rasterizer \
-    && python -m pip install --no-build-isolation ./step1x3d_texture/differentiable_renderer
-
 COPY . .
 
 # Fail the build if Python, PyTorch or their CUDA ABI do not match the setup
-# against which the model and native extensions are expected to run.
+# against which the model weights are expected to run.
 RUN python -m pip check \
     && python - <<'PY'
 import sys
 import torch
-import kaolin
-import nvdiffrast.torch
-import pytorch3d
 import torch_cluster
-import custom_rasterizer
-import mesh_processor
 import gradio as gr
 import pydantic
 
@@ -120,7 +108,7 @@ assert schema_test.get_api_info()["named_endpoints"]
 print(f"Python {sys.version.split()[0]}")
 print(f"PyTorch {torch.__version__}, CUDA ABI {torch.version.cuda}")
 print(f"Pydantic {pydantic.__version__}, Gradio API schema OK")
-print("Native CUDA/C++ extensions imported successfully")
+print("Geometry runtime imported successfully")
 PY
 
 RUN groupadd --gid ${GROUP_ID} step1x \

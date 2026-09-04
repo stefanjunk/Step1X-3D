@@ -1,0 +1,6 @@
+# Optional: only needed to run data/watertight_and_sampling.py, the geometry
+# training-data preparation script. It is deliberately kept out of the runtime
+# image because nvdiffrast ships under the Nvidia Source Code License
+# (1-Way Commercial) rather than a plain permissive licence, and the serving
+# path never imports it.
+git+https://github.com/NVlabs/nvdiffrast.git@v0.4.0
