@@ -1,0 +1,105 @@
+{
+  "cache_layout": "huggingface_hub",
+  "repositories": [
+    {
+      "repo_id": "stepfun-ai/Step1X-3D",
+      "revision": "bf7084495b3a72222f36549b7942948aa4d9daa7",
+      "licence": "Apache-2.0",
+      "redistributable": true,
+      "note": "Trained weights for geometry, VAE, label and visual encoders.",
+      "files": [
+        {
+          "path": "Step1X-3D-Geometry-Label-1300m/label_encoder/config.json",
+          "bytes": 121,
+          "sha256": "28c2aa7548924c879ca989c53ac0d30fbc0ed68ab4a4c7e469c7c36b75c6a2e3"
+        },
+        {
+          "path": "Step1X-3D-Geometry-Label-1300m/label_encoder/diffusion_pytorch_model.safetensors",
+          "bytes": 33104,
+          "sha256": "1d7d76cfe4bc95f264421fa34076826bada5a218e63febabe69461d8c2607e4b"
+        },
+        {
+          "path": "Step1X-3D-Geometry-Label-1300m/model_index.json",
+          "bytes": 746,
+          "sha256": "c8bf6e56216eca5e6d4655f0412727e53f5d3605360a03a53ef6468e5c55d9a7"
+        },
+        {
+          "path": "Step1X-3D-Geometry-Label-1300m/scheduler/scheduler_config.json",
+          "bytes": 414,
+          "sha256": "5ba6f9985d62d7262ae945543862205db29370844d120eec843fd5fefccd9c82"
+        },
+        {
+          "path": "Step1X-3D-Geometry-Label-1300m/transformer/config.json",
+          "bytes": 434,
+          "sha256": "1a343b719f971d3e53896ac0c0d7387f2f3226026fd0f0f34ce5e9ca03e5ef3e"
+        },
+        {
+          "path": "Step1X-3D-Geometry-Label-1300m/transformer/diffusion_pytorch_model.safetensors",
+          "bytes": 5086980952,
+          "sha256": "0df096288471320f3fd566e94db628c3a36a697ae6fa55e60152b236fd5918aa"
+        },
+        {
+          "path": "Step1X-3D-Geometry-Label-1300m/vae/config.json",
+          "bytes": 749,
+          "sha256": "eb3a6c7598bdc4061d9d4593d7218de2c054868346bf2c9300d38a1e5b2a88fb"
+        },
+        {
+          "path": "Step1X-3D-Geometry-Label-1300m/vae/diffusion_pytorch_model.safetensors",
+          "bytes": 766401652,
+          "sha256": "a9d764b4e3fdf377f1ba960215f2e91800fa6bf86ec5243340b96e22a0a7f781"
+        },
+        {
+          "path": "Step1X-3D-Geometry-Label-1300m/visual_eature_extractor/preprocessor_config.json",
+          "bytes": 465,
+          "sha256": "f200462fd341e9336a013fa61695f349dff32f75409c659831f30b9e8a5d3428"
+        },
+        {
+          "path": "Step1X-3D-Geometry-Label-1300m/visual_encoder/config.json",
+          "bytes": 504,
+          "sha256": "8cbd2be1de38d95864c0dd03e75446dbb2f8f659aed48c62a1ced10d05006b6f"
+        },
+        {
+          "path": "Step1X-3D-Geometry-Label-1300m/visual_encoder/diffusion_pytorch_model.safetensors",
+          "bytes": 2928089212,
+          "sha256": "f9b22f50296f1f63841c92a724c732bffee8051b59e830e9eac9a99af8d0e65e"
+        }
+      ],
+      "total_bytes": 8781508353
+    },
+    {
+      "repo_id": "facebook/dinov2-with-registers-large",
+      "revision": "e4c89a4e05589de9b3e188688a303d0f3c04d0f3",
+      "licence": "Apache-2.0",
+      "redistributable": true,
+      "note": "Configuration only; the trained weights come from the Step1X-3D checkpoint.",
+      "files": [
+        {
+          "path": "config.json",
+          "bytes": 1003,
+          "sha256": "03eee42f646659a9480f8911a81fdd81efeedd7ff39083c8e36398068daf72f5"
+        },
+        {
+          "path": "preprocessor_config.json",
+          "bytes": 436,
+          "sha256": "14e780d86fa1861f8751f868d7f45425b5feb55c38ca26f152ca5097ab30f828"
+        }
+      ],
+      "total_bytes": 1439
+    },
+    {
+      "repo_id": "openai/clip-vit-large-patch14",
+      "revision": "32bd64288804d66eefd0ccbe215aa642df71cc41",
+      "licence": "none declared on the model card",
+      "redistributable": false,
+      "note": "Configuration only, and deliberately not mirrored: redistributing files from a repository with no licence grant is the one act an undeclared licence makes risky.",
+      "files": [
+        {
+          "path": "config.json",
+          "bytes": 4519,
+          "sha256": "8a09b467700c58138c29d53c605b34ebc69beaadd13274a8a2af8ad2c2f4032a"
+        }
+      ],
+      "total_bytes": 4519
+    }
+  ]
+}

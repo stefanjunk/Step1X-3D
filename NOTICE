@@ -55,8 +55,11 @@ Weights are downloaded from Hugging Face and are not redistributed here:
 
 - stepfun-ai/Step1X-3D — Apache License 2.0.
 - facebook/dinov2-with-registers-large — Apache License 2.0.
-- openai/clip-vit-large-patch14 — the model card declares no licence; the
-  upstream openai/CLIP code repository is MIT. UNRESOLVED for the weights.
+- openai/clip-vit-large-patch14 — the model card declares no licence, and the
+  upstream openai/CLIP code repository is MIT. Only its config.json is used: the
+  encoder class is instantiated from that configuration and the trained weights
+  are loaded from the Apache-2.0 Step1X-3D checkpoint, so no OpenAI weight file
+  is downloaded or redistributed by this fork.
 
 Python dependencies are installed from their own distributions under their own
 licences; see requirements*.txt.

@@ -108,6 +108,15 @@ looked like a second non-commercial exposure. It is not one:
 The reference is therefore architectural, not copied expression. This was a
 targeted check of the cited construct, not a line-by-line diff of all of DiT.
 
+## Weights
+
+The 8.2 GB of trained weights are pinned by `weights/MANIFEST.json` (repository, revision, per-file
+size and SHA-256) and can be mirrored anywhere with `tools/weights_manifest.py`. The Step1X-3D
+weights are Apache-2.0, so holding and handing on a copy is permitted; the `openai/clip-vit-large-patch14`
+repository, which supplies only a 16 KB configuration file here, is deliberately excluded from
+mirroring because it declares no licence. `weights/README.md` explains why Git LFS is not the vehicle
+— GitHub caps a single LFS file at 2 GB and the geometry shard is 4.85 GB — and what to use instead.
+
 ## Open items
 
 1. **`openai/clip-vit-large-patch14` declares no licence on its model card.**
