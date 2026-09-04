@@ -3,9 +3,9 @@ import os
 from diffusers.utils import logging
 import PIL.Image
 import torch
+import numpy as np
+import open3d as o3d
 import trimesh
-import pymeshlab
-import tempfile
 from step1x3d_geometry.models.autoencoders.surface_extractors import MeshExtractResult
 
 logger = logging.get_logger(__name__)
@@ -131,99 +131,89 @@ def preprocess_image(
 
 
 def load_mesh(path):
-    if path.endswith(".glb"):
-        mesh = trimesh.load(path)
-    else:
-        mesh = pymeshlab.MeshSet()
-        mesh.load_new_mesh(path)
-    return mesh
+    """Load a mesh from disk as a single :class:`trimesh.Trimesh`."""
+    return trimesh.load(path, force="mesh")
 
 
-def trimesh2pymeshlab(mesh: trimesh.Trimesh):
-    with tempfile.NamedTemporaryFile(suffix=".ply", delete=False) as temp_file:
-        if isinstance(mesh, trimesh.scene.Scene):
-            for idx, obj in enumerate(mesh.geometry.values()):
-                if idx == 0:
-                    temp_mesh = obj
-                else:
-                    temp_mesh = temp_mesh + obj
-            mesh = temp_mesh
-        mesh.export(temp_file.name)
-        mesh = pymeshlab.MeshSet()
-        mesh.load_new_mesh(temp_file.name)
-    return mesh
-
-
-def pymeshlab2trimesh(mesh: pymeshlab.MeshSet):
-    with tempfile.NamedTemporaryFile(suffix=".ply", delete=False) as temp_file:
-        mesh.save_current_mesh(temp_file.name)
-        mesh = trimesh.load(temp_file.name)
-    if isinstance(mesh, trimesh.Scene):
-        combined_mesh = trimesh.Trimesh()
-        for geom in mesh.geometry.values():
-            combined_mesh = trimesh.util.concatenate([combined_mesh, geom])
-        mesh = combined_mesh
-    return mesh
-
-
-def import_mesh(mesh):
-    mesh_type = type(mesh)
+def as_trimesh(mesh) -> trimesh.Trimesh:
+    """Accept a path, a ``MeshExtractResult``, a Scene or a Trimesh."""
     if isinstance(mesh, str):
         mesh = load_mesh(mesh)
-    elif isinstance(mesh, MeshExtractResult):
-        mesh = pymeshlab.MeshSet()
-        mesh_pymeshlab = pymeshlab.Mesh(
-            vertex_matrix=mesh.verts.cpu().numpy(), face_matrix=mesh.faces.cpu().numpy()
+    if isinstance(mesh, MeshExtractResult):
+        return trimesh.Trimesh(
+            vertices=mesh.verts.detach().cpu().numpy(),
+            faces=mesh.faces.detach().cpu().numpy(),
         )
-        mesh.add_mesh(mesh_pymeshlab, "converted_mesh")
+    if isinstance(mesh, trimesh.Scene):
+        parts = list(mesh.geometry.values())
+        if not parts:
+            return trimesh.Trimesh()
+        return trimesh.util.concatenate(parts)
+    if isinstance(mesh, trimesh.Trimesh):
+        return mesh
+    raise TypeError(f"Unsupported mesh type: {type(mesh)!r}")
 
-    if isinstance(mesh, (trimesh.Trimesh, trimesh.scene.Scene)):
-        mesh = trimesh2pymeshlab(mesh)
 
-    return mesh, mesh_type
-
-
-def remove_floater(mesh):
-    mesh, mesh_type = import_mesh(mesh)
-
-    mesh.apply_filter(
-        "compute_selection_by_small_disconnected_components_per_face", nbfaceratio=0.001
+def remove_floater(mesh, min_face_ratio: float = 0.001):
+    """Drop disconnected components below ``min_face_ratio`` of all faces."""
+    body = as_trimesh(mesh)
+    if len(body.faces) == 0:
+        return body
+    components = trimesh.graph.connected_components(
+        body.face_adjacency, nodes=np.arange(len(body.faces))
     )
-    mesh.apply_filter("compute_selection_transfer_face_to_vertex", inclusive=False)
-    mesh.apply_filter("meshing_remove_selected_vertices_and_faces")
-
-    return pymeshlab2trimesh(mesh)
+    if len(components) <= 1:
+        return body
+    threshold = max(1, int(len(body.faces) * min_face_ratio))
+    keep = [component for component in components if len(component) >= threshold]
+    if not keep:  # never return an empty mesh: fall back to the largest part
+        keep = [max(components, key=len)]
+    selection = np.zeros(len(body.faces), dtype=bool)
+    selection[np.concatenate(keep)] = True
+    result = body.copy()
+    result.update_faces(selection)
+    result.remove_unreferenced_vertices()
+    return result
 
 
 def remove_degenerate_face(mesh):
-    mesh, mesh_type = import_mesh(mesh)
+    """Merge duplicate vertices and drop zero-area and duplicated faces."""
+    result = as_trimesh(mesh).copy()
+    if len(result.faces) == 0:
+        return result
+    result.merge_vertices()
+    result.update_faces(result.nondegenerate_faces())
+    result.update_faces(result.unique_faces())
+    result.remove_unreferenced_vertices()
+    return result
 
-    with tempfile.NamedTemporaryFile(suffix=".ply", delete=False) as temp_file:
-        mesh.save_current_mesh(temp_file.name)
-        mesh = pymeshlab.MeshSet()
-        mesh.load_new_mesh(temp_file.name)
 
-    return pymeshlab2trimesh(mesh)
+def reduce_face(mesh, max_facenum: int = 50000):
+    """Decimate to at most ``max_facenum`` triangles, preserving boundaries."""
+    body = as_trimesh(mesh)
+    if max_facenum <= 0 or len(body.faces) <= max_facenum:
+        return body
 
-
-def reduce_face(mesh, max_facenum=50000):
-    mesh, mesh_type = import_mesh(mesh)
-
-    if max_facenum > mesh.current_mesh().face_number():
-        return pymeshlab2trimesh(mesh)
-
-    mesh.apply_filter(
-        "meshing_decimation_quadric_edge_collapse",
-        targetfacenum=max_facenum,
-        qualitythr=1.0,
-        preserveboundary=True,
-        boundaryweight=3,
-        preservenormal=True,
-        preservetopology=True,
-        autoclean=True,
+    open3d_mesh = o3d.geometry.TriangleMesh(
+        o3d.utility.Vector3dVector(np.asarray(body.vertices, dtype=np.float64)),
+        o3d.utility.Vector3iVector(np.asarray(body.faces, dtype=np.int32)),
     )
+    # boundary_weight mirrors the boundary weighting the previous pymeshlab
+    # filter used, so open boundaries survive decimation.
+    open3d_mesh = open3d_mesh.simplify_quadric_decimation(
+        target_number_of_triangles=int(max_facenum), boundary_weight=3.0
+    )
+    open3d_mesh.remove_degenerate_triangles()
+    open3d_mesh.remove_duplicated_triangles()
+    open3d_mesh.remove_duplicated_vertices()
+    open3d_mesh.remove_unreferenced_vertices()
 
-    return pymeshlab2trimesh(mesh)
+    result = trimesh.Trimesh(
+        vertices=np.asarray(open3d_mesh.vertices),
+        faces=np.asarray(open3d_mesh.triangles),
+    )
+    result.visual = body.visual  # keep the material assigned by the pipeline
+    return result
 
 
 # Copied from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion.retrieve_timesteps
