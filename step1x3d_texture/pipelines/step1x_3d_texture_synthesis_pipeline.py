@@ -1,4 +1,6 @@
 import argparse
+import gc
+import os
 
 import numpy as np
 import torch
@@ -27,6 +29,13 @@ from scipy.sparse.linalg import spsolve
 from step1x3d_geometry.models.pipelines.pipeline_utils import smart_load_model
 
 
+def _env_flag(name, default=False):
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 class Step1X3DTextureConfig:
     def __init__(self):
         # prepare pipeline params
@@ -37,9 +46,18 @@ class Step1X3DTextureConfig:
         self.adapter_path = "stepfun-ai/Step1X-3D"
         self.scheduler = "ddpm"
         self.num_views = 6
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        default_device = "cuda:0" if torch.cuda.is_available() else "cpu"
+        self.device = os.getenv("TEXTURE_DEVICE", default_device)
+        self.aux_device = os.getenv("TEXTURE_AUX_DEVICE", self.device)
         self.dtype = torch.float16
         self.lora_scale = None
+        self.cpu_offload = _env_flag("TEXTURE_CPU_OFFLOAD", False)
+        self.background_removal_device = os.getenv(
+            "BACKGROUND_REMOVAL_DEVICE", "cuda:1"
+        )
+        self.background_removal_revision = os.getenv(
+            "BIREFNET_REVISION", "e2bf8e4460fc8fa32bba5ea4d94b3233d367b0e4"
+        )
 
         # run pipeline params
         self.text = "high quality"
@@ -82,6 +100,7 @@ class Step1X3DTexturePipeline:
             default_resolution=self.config.render_size,
             texture_size=self.config.texture_size,
             camera_distance=self.config.camera_distance,
+            device=self.config.device,
         )
 
         self.ig2mv_pipe = self.prepare_ig2mv_pipeline(
@@ -93,12 +112,30 @@ class Step1X3DTexturePipeline:
             scheduler=self.config.scheduler,
             num_views=self.config.num_views,
             device=self.config.device,
+            aux_device=self.config.aux_device,
             dtype=self.config.dtype,
         )
 
     @classmethod
-    def from_pretrained(cls, model_path, subfolder):
+    def from_pretrained(
+        cls,
+        model_path,
+        subfolder,
+        *,
+        device=None,
+        aux_device=None,
+        cpu_offload=None,
+        background_removal_device=None,
+    ):
         config = Step1X3DTextureConfig()
+        if device is not None:
+            config.device = device
+        if aux_device is not None:
+            config.aux_device = aux_device
+        if cpu_offload is not None:
+            config.cpu_offload = cpu_offload
+        if background_removal_device is not None:
+            config.background_removal_device = background_removal_device
         local_model_path = smart_load_model(model_path, subfolder=subfolder)
         print(f'Local model path: {local_model_path}')
         config.adapter_path = local_model_path
@@ -124,17 +161,24 @@ class Step1X3DTexturePipeline:
         scheduler,
         num_views,
         device,
+        aux_device,
         dtype,
     ):
         # Load vae and unet if provided
         pipe_kwargs = {}
         if vae_model is not None:
-            pipe_kwargs["vae"] = AutoencoderKL.from_pretrained(vae_model)
+            pipe_kwargs["vae"] = AutoencoderKL.from_pretrained(
+                vae_model, torch_dtype=dtype
+            )
         if unet_model is not None:
-            pipe_kwargs["unet"] = UNet2DConditionModel.from_pretrained(unet_model)
+            pipe_kwargs["unet"] = UNet2DConditionModel.from_pretrained(
+                unet_model, torch_dtype=dtype
+            )
 
         # Prepare pipeline
-        pipe = IG2MVSDXLPipeline.from_pretrained(base_model, **pipe_kwargs)
+        pipe = IG2MVSDXLPipeline.from_pretrained(
+            base_model, torch_dtype=dtype, **pipe_kwargs
+        )
 
         # Load scheduler if provided
         scheduler_class = None
@@ -154,8 +198,24 @@ class Step1X3DTexturePipeline:
             self_attn_processor=DecoupledMVRowColSelfAttnProcessor2_0,
         )
         pipe.load_custom_adapter(adapter_path, "step1x-3d-ig2v.safetensors")
-        pipe.to(device=device, dtype=dtype)
-        pipe.cond_encoder.to(device=device, dtype=dtype)
+        pipe.to(dtype=dtype)
+        pipe.vae.enable_slicing()
+        pipe.vae.enable_tiling()
+        pipe._step1x_execution_device = torch.device(device)
+        pipe._step1x_aux_device = torch.device(
+            device if self.config.cpu_offload else aux_device
+        )
+        pipe._step1x_manual_placement = not self.config.cpu_offload
+        if self.config.cpu_offload:
+            if torch.device(device).type != "cuda":
+                raise ValueError("Texture-CPU-Offload benoetigt ein CUDA-Geraet.")
+            pipe.enable_model_cpu_offload(device=device)
+            # cond_encoder is a custom component and is not registered in the
+            # original Diffusers offload sequence.
+            pipe.cond_encoder.to(device=device, dtype=dtype)
+        else:
+            pipe.to(device=device)
+            pipe.cond_encoder.to(device=device, dtype=dtype)
 
         # load lora if provided
         if lora_model is not None:
@@ -166,7 +226,10 @@ class Step1X3DTexturePipeline:
 
     def remove_bg(self, image, net, transform, device):
         image_size = image.size
-        input_images = transform(image).unsqueeze(0).to(device)
+        model_dtype = next(net.parameters()).dtype
+        input_images = transform(image).unsqueeze(0).to(
+            device=device, dtype=model_dtype
+        )
         with torch.no_grad():
             preds = net(input_images)[-1].sigmoid().cpu()
         pred = preds[0].squeeze()
@@ -335,23 +398,55 @@ class Step1X3DTexturePipeline:
 
     @torch.no_grad()
     def __call__(self, image, mesh, remove_bg=True, seed=2025):
+        prepared_image = image
         if remove_bg:
-            birefnet = AutoModelForImageSegmentation.from_pretrained(
-                "ZhengPeng7/BiRefNet", trust_remote_code=True
-            )
-            birefnet.to(self.config.device)
-            transform_image = transforms.Compose(
-                [
-                    transforms.Resize((1024, 1024)),
-                    transforms.ToTensor(),
-                    transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
-                ]
-            )
-            remove_bg_fn = lambda x: self.remove_bg(
-                x, birefnet, transform_image, self.config.device
-            )
-        else:
-            remove_bg_fn = None
+            reference_image = Image.open(image) if isinstance(image, str) else image
+            if len(reference_image.split()) == 1:
+                reference_image = reference_image.convert("RGBA")
+
+            # An existing alpha channel already contains the required mask.
+            # Only load the large fallback model for an actual RGB input and
+            # release it before the CPU-offloaded SDXL pipeline starts.
+            if reference_image.mode == "RGB":
+                background_device = torch.device(
+                    self.config.background_removal_device
+                )
+                model_kwargs = {
+                    "trust_remote_code": True,
+                    "revision": self.config.background_removal_revision,
+                }
+                if background_device.type == "cuda":
+                    model_kwargs["torch_dtype"] = torch.float16
+                birefnet = AutoModelForImageSegmentation.from_pretrained(
+                    "ZhengPeng7/BiRefNet", **model_kwargs
+                )
+                birefnet.to(background_device)
+                transform_image = transforms.Compose(
+                    [
+                        transforms.Resize((1024, 1024)),
+                        transforms.ToTensor(),
+                        transforms.Normalize(
+                            [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]
+                        ),
+                    ]
+                )
+                try:
+                    reference_image = self.remove_bg(
+                        reference_image,
+                        birefnet,
+                        transform_image,
+                        background_device,
+                    )
+                finally:
+                    del birefnet
+                    gc.collect()
+                    if background_device.type == "cuda":
+                        with torch.cuda.device(background_device):
+                            torch.cuda.empty_cache()
+
+            if reference_image.mode == "RGBA":
+                reference_image = self.preprocess_image(reference_image, 768, 768)
+            prepared_image = reference_image
 
         if isinstance(mesh, trimesh.Scene):
             mesh = mesh.to_geometry()
@@ -363,7 +458,7 @@ class Step1X3DTexturePipeline:
                 mesh=mesh,
                 num_views=self.config.num_views,
                 text=self.config.text,
-                image=image,
+                image=prepared_image,
                 height=768,
                 width=768,
                 num_inference_steps=self.config.num_inference_steps,
@@ -373,7 +468,7 @@ class Step1X3DTexturePipeline:
                 reference_conditioning_scale=self.config.reference_conditioning_scale,
                 negative_prompt=self.config.negative_prompt,
                 device=self.config.device,
-                remove_bg_fn=remove_bg_fn,
+                remove_bg_fn=None,
             )
         )
 

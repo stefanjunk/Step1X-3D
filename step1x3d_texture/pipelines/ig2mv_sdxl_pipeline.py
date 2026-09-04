@@ -545,7 +545,17 @@ class IG2MVSDXLPipeline(StableDiffusionXLPipeline, CustomAdapterMixin):
         else:
             batch_size = prompt_embeds.shape[0]
 
-        device = self._execution_device
+        device = getattr(self, "_step1x_execution_device", self._execution_device)
+        aux_device = getattr(self, "_step1x_aux_device", device)
+        manual_placement = getattr(self, "_step1x_manual_placement", False)
+        if manual_placement:
+            # The VAE is moved to the auxiliary GPU later for its largest
+            # activation-heavy passes. It must be back on the main device for
+            # reference-image encoding at the start of repeated requests.
+            self.vae.to(device=device)
+            self.text_encoder.to(device=device)
+            self.text_encoder_2.to(device=device)
+            self.cond_encoder.to(device=device)
 
         # 3. Encode input prompt
         lora_scale = (
@@ -574,6 +584,14 @@ class IG2MVSDXLPipeline(StableDiffusionXLPipeline, CustomAdapterMixin):
             lora_scale=lora_scale,
             clip_skip=self.clip_skip,
         )
+        if manual_placement and aux_device != device:
+            # Prompt embeddings are now resident on the main device; the
+            # encoders are not used again during denoising.
+            self.text_encoder.to(device=aux_device)
+            self.text_encoder_2.to(device=aux_device)
+            if device.type == "cuda":
+                with torch.cuda.device(device):
+                    torch.cuda.empty_cache()
 
         # 4. Prepare timesteps
         timesteps, num_inference_steps = retrieve_timesteps(
@@ -600,7 +618,7 @@ class IG2MVSDXLPipeline(StableDiffusionXLPipeline, CustomAdapterMixin):
         azimuths = texture_sync_config["azimuths"]
         texture_sync_ratio = texture_sync_config["texture_sync_ratio"]
         camera_poses = [(elv, azim) for elv, azim in zip(elevations, azimuths)]
-        uvp = UVP(texture_size=texture_size, render_size=latent_size, sampling_mode="nearest", channels=4, device=self._execution_device)
+        uvp = UVP(texture_size=texture_size, render_size=latent_size, sampling_mode="nearest", channels=4, device=device)
         uvp.load_mesh(mesh, scale_factor=1.0, autouv=True)
         uvp.set_cameras_and_render_settings(camera_poses, centers=None, camera_distance=texture_sync_config["camera_distance"], scale=((1.0, 1.0, 1.0),))
 
@@ -732,6 +750,13 @@ class IG2MVSDXLPipeline(StableDiffusionXLPipeline, CustomAdapterMixin):
         adapter_state = self.cond_encoder(control_image_feature)
         for i, state in enumerate(adapter_state):
             adapter_state[i] = state * control_conditioning_scale
+        if manual_placement and aux_device != device:
+            # The adapter outputs remain on the main texture GPU, so its
+            # weights can share GPU 0 with the idle text encoders.
+            self.cond_encoder.to(device=aux_device)
+            if device.type == "cuda":
+                with torch.cuda.device(device):
+                    torch.cuda.empty_cache()
 
         # 8. Denoising loop
         num_warmup_steps = max(
@@ -776,7 +801,7 @@ class IG2MVSDXLPipeline(StableDiffusionXLPipeline, CustomAdapterMixin):
         shuffle_background_end = texture_sync_config["shuffle_background_end"]
         num_timesteps = self.scheduler.config.num_train_timesteps
     
-        uvp.to(self._execution_device)
+        uvp.to(device)
         color_constants = {"black": [-1, -1, -1], "white": [1, 1, 1], "maroon": [0, -1, -1],
 			"red": [1, -1, -1], "olive": [0, 0, -1], "yellow": [1, 1, -1],
 			"green": [-1, 0, -1], "lime": [-1 ,1, -1], "teal": [-1, 0, 0],
@@ -785,17 +810,31 @@ class IG2MVSDXLPipeline(StableDiffusionXLPipeline, CustomAdapterMixin):
         color_names = list(color_constants.keys())
         background_colors = [random.choice(list(color_constants.keys())) for i in range(len(camera_poses))]
         intermediate_results = []
+        if manual_placement:
+            self.vae.to(device=aux_device)
+            if device.type == "cuda":
+                with torch.cuda.device(device):
+                    torch.cuda.empty_cache()
         self.upcast_vae()
         self.vae.config.force_upcast = True
-        color_images = torch.FloatTensor([color_constants[name] for name in color_names]).reshape(-1,3,1,1).to(dtype=torch.float32, device=self._execution_device)
+        vae_device = next(self.vae.parameters()).device
+        color_images = torch.FloatTensor([color_constants[name] for name in color_names]).reshape(-1,3,1,1).to(dtype=torch.float32, device=vae_device)
         color_images = torch.ones(
             (1,1,latent_size*8, latent_size*8), 
-            device=self._execution_device, 
+            device=vae_device,
             dtype=torch.float32
         ) * color_images
         color_images = ((0.5*color_images)+0.5)
-        color_latents = encode_latents(self.vae, color_images).to(dtype=self.text_encoder_2.dtype)
+        color_latents = encode_latents(self.vae, color_images).to(
+            device=device, dtype=self.text_encoder_2.dtype
+        )
         color_latents = {color[0]:color[1] for color in zip(color_names, [latent for latent in color_latents])}	
+        del color_images
+        if manual_placement:
+            self.vae.to(dtype=torch.float16)
+            if aux_device.type == "cuda":
+                with torch.cuda.device(aux_device):
+                    torch.cuda.empty_cache()
 
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
@@ -944,12 +983,15 @@ class IG2MVSDXLPipeline(StableDiffusionXLPipeline, CustomAdapterMixin):
             if needs_upcasting:
                 self.upcast_vae()
                 latents = latents.to(
-                    next(iter(self.vae.post_quant_conv.parameters())).dtype
+                    device=next(iter(self.vae.post_quant_conv.parameters())).device,
+                    dtype=next(iter(self.vae.post_quant_conv.parameters())).dtype,
                 )
             elif latents.dtype != self.vae.dtype:
                 if torch.backends.mps.is_available():
                     # some platforms (eg. apple mps) misbehave due to a pytorch bug: https://github.com/pytorch/pytorch/pull/99272
                     self.vae = self.vae.to(latents.dtype)
+                elif latents.device != next(self.vae.parameters()).device:
+                    latents = latents.to(next(self.vae.parameters()).device)
 
             # unscale/denormalize the latents
             # denormalize with the mean and std if available and not None

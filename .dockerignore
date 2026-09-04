@@ -1,0 +1,16 @@
+.git
+.gitignore
+.python-version
+.cache
+cache
+output
+outputs
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.ruff_cache
+**/build
+**/dist
+**/*.egg-info
+data
+val_data

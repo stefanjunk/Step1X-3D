@@ -51,22 +51,33 @@ def preprocess_image(
             if rembg_backend == "default":
                 image = rembg.remove(image, **rembg_kwargs)
             else:
+                rembg_provider = os.getenv(
+                    "REMBG_PROVIDER", "CPUExecutionProvider"
+                )
+                providers = ["CPUExecutionProvider"]
+                if rembg_provider == "CUDAExecutionProvider":
+                    providers.insert(
+                        0,
+                        (
+                            "CUDAExecutionProvider",
+                            {
+                                "device_id": int(os.getenv("REMBG_CUDA_DEVICE", "0")),
+                                "arena_extend_strategy": "kSameAsRequested",
+                                "gpu_mem_limit": int(
+                                    os.getenv("REMBG_GPU_MEMORY_GB", "2")
+                                )
+                                * 1024
+                                * 1024
+                                * 1024,
+                                "cudnn_conv_algo_search": "HEURISTIC",
+                            },
+                        ),
+                    )
                 image = rembg.remove(
                     image,
                     session=rembg.new_session(
                         model_name="bria",
-                        providers=[
-                            (
-                                "CUDAExecutionProvider",
-                                {
-                                    "device_id": 0,
-                                    "arena_extend_strategy": "kSameAsRequested",
-                                    "gpu_mem_limit": 6 * 1024 * 1024 * 1024,
-                                    "cudnn_conv_algo_search": "HEURISTIC",
-                                },
-                            ),
-                            "CPUExecutionProvider",
-                        ],
+                        providers=providers,
                     ),
                     **rembg_kwargs,
                 )
@@ -399,6 +410,5 @@ def smart_load_model(model_path, subfolder = ""):
             return os.path.join(model_path, subfolder)
         else:
             return try_download(model_path, subfolder)
-
 
 

@@ -40,7 +40,7 @@ def test_performance():
         process_tensors(tensor1, tensor2)
 
 
-def voronoi_solve(texture, mask, device="cuda"):
+def voronoi_solve(texture, mask, device=None):
     """
     This is a warpper of the original cupy voronoi implementation
     The texture color where mask value is 1 will propagate to its
@@ -51,19 +51,35 @@ def voronoi_solve(texture, mask, device="cuda"):
     return:
         texture - Propagated tensor
     """
+    texture_device = texture.device
+    device = texture_device if device is None else torch.device(device)
+    if device != texture_device:
+        raise ValueError(
+            f"Voronoi device {device} does not match texture device "
+            f"{texture_device}."
+        )
+    if device.type != "cuda":
+        raise ValueError("The CuPy Voronoi implementation requires a CUDA tensor.")
+    if mask.device != device:
+        mask = mask.to(device)
+
     h, w, c = texture.shape
     # hwc_texture = texture.permute(1,2,0)
     valid_pix_coord = torch.where(mask > 0)
 
-    indices = torch.arange(0, h * w).to(device).reshape(h, w)
-    idx_map = -1 * torch.ones((h, w), dtype=torch.int64).to(device)
+    indices = torch.arange(h * w, dtype=torch.int64, device=device).reshape(h, w)
+    idx_map = torch.full((h, w), -1, dtype=torch.int64, device=device)
     idx_map[valid_pix_coord] = indices[valid_pix_coord]
 
-    ping = cp.asarray(idx_map)
-    pong = cp.copy(ping)
-    ping = JFAVoronoiDiagram(ping, pong)
+    cuda_index = device.index
+    if cuda_index is None:
+        cuda_index = torch.cuda.current_device()
+    with cp.cuda.Device(cuda_index):
+        ping = cp.asarray(idx_map)
+        pong = cp.copy(ping)
+        ping = JFAVoronoiDiagram(ping, pong)
 
-    voronoi_map = torch.as_tensor(ping, device=device)
+        voronoi_map = torch.as_tensor(ping, device=device)
     nc_voronoi_texture = torch.index_select(
         texture.reshape(h * w, c), 0, voronoi_map.reshape(h * w)
     )

@@ -17,7 +17,7 @@ def geometry_pipeline(input_image_path, save_glb_path):
     """
     pipeline = Step1X3DGeometryPipeline.from_pretrained(
         "stepfun-ai/Step1X-3D", subfolder='Step1X-3D-Geometry-1300m'
-    ).to("cuda")
+    ).to(os.getenv("GEOMETRY_DEVICE", "cuda:0"))
 
     generator = torch.Generator(device=pipeline.device)
     generator.manual_seed(2025)
@@ -33,7 +33,7 @@ def geometry_label_pipeline(input_image_path, save_glb_path):
     """
     pipeline = Step1X3DGeometryPipeline.from_pretrained(
         "stepfun-ai/Step1X-3D", subfolder='Step1X-3D-Geometry-Label-1300m'
-    ).to("cuda")
+    ).to(os.getenv("GEOMETRY_DEVICE", "cuda:0"))
     generator = torch.Generator(device=pipeline.device)
     generator.manual_seed(2025)
 

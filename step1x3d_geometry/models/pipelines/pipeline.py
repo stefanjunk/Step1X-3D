@@ -5,7 +5,6 @@ import warnings
 from typing import Callable, List, Optional, Union, Dict, Any
 import PIL.Image
 import trimesh
-import rembg
 import torch
 import numpy as np
 from huggingface_hub import hf_hub_download

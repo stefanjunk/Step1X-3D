@@ -1,0 +1,64 @@
+name: step1x-3d
+
+services:
+  step1x3d:
+    image: step1x3d:python310-cu124
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        USER_ID: ${USER_ID:-1000}
+        GROUP_ID: ${GROUP_ID:-1000}
+        TORCH_CUDA_ARCH_LIST: ${TORCH_CUDA_ARCH_LIST:-8.9}
+    init: true
+    ports:
+      - "${STEP1X_PORT:-7861}:7861"
+    environment:
+      GEOMETRY_DEVICE: ${GEOMETRY_DEVICE:-cuda:0}
+      TEXTURE_DEVICE: ${TEXTURE_DEVICE:-cuda:1}
+      TEXTURE_AUX_DEVICE: ${TEXTURE_AUX_DEVICE:-cuda:0}
+      TEXTURE_CPU_OFFLOAD: ${TEXTURE_CPU_OFFLOAD:-0}
+      BACKGROUND_REMOVAL_DEVICE: ${BACKGROUND_REMOVAL_DEVICE:-cuda:1}
+      BIREFNET_REVISION: ${BIREFNET_REVISION:-e2bf8e4460fc8fa32bba5ea4d94b3233d367b0e4}
+      REMBG_PROVIDER: ${REMBG_PROVIDER:-CPUExecutionProvider}
+      HF_HOME: /models/huggingface
+      PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
+      GRADIO_ANALYTICS_ENABLED: "false"
+    volumes:
+      - type: bind
+        source: ${STEP1X_HF_CACHE:-./.cache/huggingface}
+        target: /models/huggingface
+      - type: bind
+        source: ./cache
+        target: /workspace/Step1X-3D/cache
+      - type: bind
+        source: ./output
+        target: /workspace/Step1X-3D/output
+      - type: volume
+        source: rembg-cache
+        target: /home/step1x/.u2net
+    shm_size: "16gb"
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 2
+              capabilities: [gpu]
+    stop_grace_period: 2m
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:7861/', timeout=5)"
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 45m
+
+volumes:
+  rembg-cache:
