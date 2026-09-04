@@ -61,8 +61,12 @@ def generate_func(
     geometry_mesh = out.mesh[0]
     del out
 
+    # Upstream exported the raw mesh here and only cleaned it to feed the
+    # texture stage. With that stage gone the cleaned mesh is the product, so it
+    # is exported instead, and the face budget comes from the request rather
+    # than from reduce_face's default.
     geometry_mesh = remove_degenerate_face(geometry_mesh)
-    geometry_mesh = reduce_face(geometry_mesh)
+    geometry_mesh = reduce_face(geometry_mesh, int(max_facenum))
     geometry_mesh.export(geometry_save_path)
 
     del geometry_mesh

@@ -2,9 +2,7 @@ import warnings
 
 warnings.filterwarnings("ignore")
 import os
-import trimesh
 
-from step1x3d_geometry.models.pipelines.pipeline_utils import reduce_face, remove_degenerate_face
 from step1x3d_geometry.models.pipelines.pipeline import Step1X3DGeometryPipeline
 import torch
 
